@@ -1,0 +1,18 @@
+numpy
+h5py
+pandas
+scikit-learn
+pytorch-lightning
+graphviz
+dotted-dict
+networkx
+einops # s4 related
+opt_einsum # s4 related
+cmake # s4 related
+pykeops # s4 related
+pyEDFlib # eeg
+timm
+GitPython
+wandb
+setuptools==59.5.0
+matplotlib==3.3.0
