@@ -1,6 +1,6 @@
 # Spatiotemporal Modeling of Multivariate Signals With Graph Neural Networks and Structured State Space Models
 
-Siyi Tang, Jared A. Dunnmon, Liangqiong Qu, Khaled K. Saab, Christopher Lee-Messer, Daniel L. Rubin
+Siyi Tang, Jared A. Dunnmon, Liangqiong Qu, Khaled K. Saab, Christopher Lee-Messer, Daniel L. Rubin. *arXiv*. https://arxiv.org/abs/2211.11176
 
 ---
 ## Setup
@@ -47,4 +47,13 @@ bash ./scripts/run_pemsbay.sh
 ---
 ## Reference
 If you use this codebase, or otherwise find our work valuable, please cite:
-TBD
+```
+@misc{tang2022spatiotemporal,
+      title={Spatiotemporal Modeling of Multivariate Signals With Graph Neural Networks and Structured State Space Models}, 
+      author={Siyi Tang and Jared A. Dunnmon and Liangqiong Qu and Khaled K. Saab and Christopher Lee-Messer and Daniel L. Rubin},
+      year={2022},
+      eprint={2211.11176},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG}
+}
+```
