@@ -59,6 +59,10 @@ bash ./scripts/run_pemsbay.sh
 ```
 
 ---
+## Updates
+* 2023-03: Traffic forecasting related experiments have been moved to the branch `traffic`.
+
+---
 ## Reference
 If you use this codebase, or otherwise find our work valuable, please cite:
 ```
