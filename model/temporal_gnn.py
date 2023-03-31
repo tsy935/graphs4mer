@@ -154,7 +154,7 @@ class TemporalGNN(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
         self.classifier = nn.Linear(hidden_dim, num_classes)
 
-    def forward(self, data):
+    def forward(self, data, lengths=None):
         """
         Args:
             data: torch geometric data object
@@ -164,6 +164,9 @@ class TemporalGNN(nn.Module):
         _, seq_len, _ = x.shape
         num_nodes = self.num_nodes
         batch_idx = data.batch
+
+        if lengths is not None:
+            lengths = torch.repeat_interleave(lengths, num_nodes, dim=0)
 
         if self.use_prior:
             edge_index, edge_weight = data.edge_index, data.edge_attr
@@ -178,18 +181,39 @@ class TemporalGNN(nn.Module):
             edge_index = edge_index.to(x.device)
             edge_weight = edge_weight.to(x.device)
             adj_mat = adj_mat.to(x.device)
+            
+        # add self-loop
+        edge_index, edge_weight = torch_geometric.utils.remove_self_loops(
+            edge_index=edge_index, edge_attr=edge_weight
+        )
+        edge_index, edge_weight = torch_geometric.utils.add_self_loops(
+            edge_index=edge_index,
+            edge_attr=edge_weight,
+            fill_value=1,
+        )
 
         # temporal layer
         if self.temporal_model == "s4":
-            x = self.t_model(x)  # (batch * num_nodes, seq_len, hidden_dim)
+            x = self.t_model(x, lengths=lengths)  # (batch * num_nodes, seq_len, hidden_dim)
         else:
             x, _ = self.t_model(x)
 
         # temporal pool
         if self.temporal_pool == "mean":
-            x = torch.mean(x, dim=1) # (batch * num_nodes, hidden_dim)
+            if lengths is None:
+                x = torch.mean(x, dim=1)  # (batch * num_nodes, hidden_dim)
+            else:
+                x = torch.stack(
+                    [
+                        torch.mean(out[:length, :], dim=0)
+                        for out, length in zip(torch.unbind(x, dim=0), lengths)
+                    ],
+                    dim=0,
+                ) # (batch * num_nodes, hidden_dim)
         else:
-            x = self.temporal_pool_layer(x).squeeze(1)  # (batch * num_nodes, hidden_dim)
+            x = self.temporal_pool_layer(x).squeeze(
+                1
+            )  # (batch * num_nodes, hidden_dim)
 
         for i in range(len(self.gnn_layers)):
 
@@ -215,7 +239,6 @@ class TemporalGNN(nn.Module):
         x = self.classifier(x)
 
         return x
-
 
 class TemporalGNN_Regression(nn.Module):
     def __init__(

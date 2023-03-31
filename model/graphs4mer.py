@@ -10,9 +10,20 @@ from torch_geometric.nn import (
 from torch_geometric.nn import global_add_pool, global_mean_pool, global_max_pool
 import torch_geometric
 import scipy
+import math
 from model.graph_learner import *
 from model.s4 import S4Model
 from model.decoders import SequenceDecoder
+
+def calculate_cosine_decay_weight(max_weight, epoch, epoch_total, min_weight=0):
+    """
+    Calculate decayed weight (hyperparameter) based on cosine annealing schedule
+    Referred to https://arxiv.org/abs/1608.03983
+    and https://pytorch.org/docs/stable/generated/torch.optim.lr_scheduler.CosineAnnealingLR.html
+    """
+    curr_weight = min_weight + \
+        0.5 * (max_weight - min_weight) * (1 + math.cos(epoch / epoch_total  * math.pi))
+    return curr_weight
 
 def calculate_normalized_laplacian(adj):
     """
@@ -131,7 +142,6 @@ class GraphS4mer(nn.Module):
         channels=1,
         temporal_model="s4",
         bidirectional=False,
-        temporal_pool="mean",
         prenorm=False,
         postact=None,
         metric="self_attention",
@@ -141,19 +151,21 @@ class GraphS4mer(nn.Module):
         prune_method="thresh",
         edge_top_perc=0.5,
         thresh=None,
+        temporal_pool="mean",
         graph_pool="sum",
-        activation_fn="leaky_relu",
+        activation_fn="relu",
         num_classes=1,
         undirected_graph=True,
         use_prior=False,
         K=3,
         regularizations=["feature_smoothing", "degree", "sparse"],
         residual_weight=0.0,
+        decay_residual_weight=False,
         **kwargs
     ):
         super().__init__()
 
-        if max_seq_len % resolution != 0:
+        if (resolution is not None) and (max_seq_len % resolution != 0):
             raise ValueError("max_seq_len must be divisible by resolution!")
 
         self.input_dim = input_dim
@@ -174,6 +186,7 @@ class GraphS4mer(nn.Module):
         self.resolution = resolution
         self.prune_method = prune_method
         self.thresh = thresh
+        self.decay_residual_weight = decay_residual_weight
 
         # temporal layer
         if temporal_model == "gru":
@@ -251,7 +264,14 @@ class GraphS4mer(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
         self.classifier = nn.Linear(hidden_dim, num_classes)
 
-    def forward(self, data, return_attention=False, lengths=None):
+    def forward(
+        self, 
+        data, 
+        return_attention=False, 
+        lengths=None,
+        epoch=None,
+        epoch_total=None,
+    ):
         """
         Args:
             data: torch geometric data object
@@ -261,36 +281,55 @@ class GraphS4mer(nn.Module):
         num_nodes = self.num_nodes
         _, seq_len, _ = x.shape
         batch_idx = data.batch
+
+        if lengths is not None:
+            lengths = torch.repeat_interleave(lengths, num_nodes, dim=0)
+
         # temporal layer
         if self.temporal_model == "s4":
             x = self.t_model(x, lengths)  # (batch * num_nodes, seq_len, hidden_dim)
         else:
+            if lengths is not None:
+                x = pack_padded_sequence(x, lengths, batch_first=True)
             x, _ = self.t_model(x)
-
-        x = x.view(
-            batch, num_nodes, seq_len, -1
-        )  # (batch, num_nodes, seq_len, hidden_dim)
+            if lengths is not None:
+                x, lengths = pad_packed_sequence(x)
 
         # get output with <resolution> as interval
-        x_tmp = []
-        num_dynamic_graphs = self.max_seq_len // self.resolution
-        for t in range(num_dynamic_graphs):
-            start = t * self.resolution
-            stop = start + self.resolution
-            curr_x = torch.mean(x[:, :, start:stop, :], dim=2)
-            x_tmp.append(curr_x)
-        x_tmp = torch.stack(
-            x_tmp, dim=1
-        )  # (batch, num_dynamic_graphs, num_nodes, hidden_dim)
-        x = x_tmp.reshape(
-            -1, num_nodes, self.hidden_dim
-        )  # (batch * num_dynamic_graphs, num_nodes, hidden_dim)
-        del x_tmp
+        if lengths is None:
+            x = x.view(
+                batch, num_nodes, seq_len, -1
+            )  # (batch, num_nodes, seq_len, hidden_dim)
+            x_tmp = []
+            num_dynamic_graphs = self.max_seq_len // self.resolution
+            for t in range(num_dynamic_graphs):
+                start = t * self.resolution
+                stop = start + self.resolution
+                curr_x = torch.mean(x[:, :, start:stop, :], dim=2)
+                x_tmp.append(curr_x)
+            x_tmp = torch.stack(
+                x_tmp, dim=1
+            )  # (batch, num_dynamic_graphs, num_nodes, hidden_dim)
+            x = x_tmp.reshape(
+                -1, num_nodes, self.hidden_dim
+            )  # (batch * num_dynamic_graphs, num_nodes, hidden_dim)
+            del x_tmp
+        else:  # for variable lengths, mean pool over actual lengths
+            x = torch.stack(
+                [
+                    torch.mean(out[:length, :], dim=0)
+                    for out, length in zip(torch.unbind(x, dim=0), lengths)
+                ],
+                dim=0,
+            )
+            x = x.reshape(batch, num_nodes, -1)  # (batch, num_nodes, hidden_dim)
+            num_dynamic_graphs = 1
 
         # get initial adj
         if self.use_prior:
-            edge_index, edge_weight = data.edge_index, data.edge_attr
-            adj_mat = data.adj_mat
+            adj_mat = torch_geometric.utils.to_dense_adj(
+                edge_index=data.edge_index, batch=data.batch, edge_attr=data.edge_attr
+            )
         else:
             # knn cosine graph
             edge_index, edge_weight, adj_mat = get_knn_graph(
@@ -318,14 +357,28 @@ class GraphS4mer(nn.Module):
             adj_mat = torch.cat([adj_mat] * num_dynamic_graphs * batch, dim=0)
         elif len(adj_mat.shape) == 3 and (adj_mat.shape != attn_weight.shape):
             adj_mat = torch.cat([adj_mat] * num_dynamic_graphs, dim=0)
-
+        
+        # knn graph weight (aka residual weight) decay
+        if self.decay_residual_weight:
+            assert (epoch is not None) and (epoch_total is not None)
+            residual_weight = calculate_cosine_decay_weight(
+                max_weight=self.residual_weight, epoch=epoch, epoch_total=epoch_total, min_weight=0
+            )
+        else:
+            residual_weight = self.residual_weight
+        # add knn graph
         adj_mat = (
-            self.residual_weight * adj_mat + (1 - self.residual_weight) * attn_weight
+            residual_weight * adj_mat + (1 - residual_weight) * attn_weight
         )
 
         # prune graph
         adj_mat = prune_adj_mat(
-            adj_mat, num_nodes, method=self.prune_method, edge_top_perc=self.edge_top_perc, knn=self.K, thresh=self.thresh,
+            adj_mat,
+            num_nodes,
+            method=self.prune_method,
+            edge_top_perc=self.edge_top_perc,
+            knn=self.K,
+            thresh=self.thresh,
         )
 
         # regularization loss
@@ -376,6 +429,7 @@ class GraphS4mer(nn.Module):
             x, _ = torch.max(x, dim=1)
         else:
             raise NotImplementedError
+        feat = x.clone()
 
         # classifier
         x = self.classifier(x)
@@ -388,6 +442,7 @@ class GraphS4mer(nn.Module):
                     batch, num_dynamic_graphs, num_nodes, num_nodes
                 ),
                 adj_mat.reshape(batch, num_dynamic_graphs, num_nodes, num_nodes),
+                feat
             )
         else:
             return x, reg_losses
@@ -593,7 +648,14 @@ class GraphS4mer_Regression(nn.Module):
             mode="last" # "last" equivalent to no pooling when input output seq lengths are the same
         )
 
-    def forward(self, data, return_attention=False):
+    def forward(
+        self, 
+        data, 
+        return_attention=False,
+        lengths=None,
+        epoch=None,
+        epoch_total=None
+    ):
         """
         Args:
             data: torch geometric data object

@@ -23,6 +23,12 @@ def get_args():
     parser.add_argument(
         "--save_output",
         type=str2bool,
+        default="true",
+        help="Whether to save model outputs.",
+    )
+    parser.add_argument(
+        "--save_attn_weights",
+        type=str2bool,
         default="false",
         help="Whether to save model outputs.",
     )
@@ -34,6 +40,18 @@ def get_args():
     )
     parser.add_argument(
         "--do_train", default=True, type=str2bool, help="Whether perform training."
+    )
+    parser.add_argument(
+        "--freeze_s4", 
+        default=False, 
+        type=str2bool, 
+        help="Whether to freeze pretrained S4."
+    )
+    parser.add_argument(
+        "--s4_pretrained_dir",
+        type=str,
+        default=None,
+        help="Dir to pretrained S4 model."
     )
     parser.add_argument(
         "--gpus", type=int, default=1, help="Number of GPUs for training."
@@ -51,6 +69,7 @@ def get_args():
             "tuh",
             "pems_bay",
             "dodh",
+            "icbeb",
         ),
     )
     parser.add_argument(
@@ -76,6 +95,12 @@ def get_args():
     )
     parser.add_argument(
         "--output_seq_len", type=int, default=1, help="Output sequence length."
+    )
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        default=12,
+        help="Forecasting horizon. Only for forecasting tasks.",
     )
     parser.add_argument(
         "--sampling_freq",
@@ -232,6 +257,12 @@ def get_args():
         help="Weight for residual connection in graph structure learning.",
     )
     parser.add_argument(
+        "--decay_residual_weight",
+        type=str2bool,
+        default=False,
+        help="Whether to decay the residual weight in graph structure learning."
+    )
+    parser.add_argument(
         "--feature_smoothing_weight",
         type=float,
         default=0.0,
@@ -365,6 +396,8 @@ def get_args():
             "kappa",
             "precision",
             "recall",
+            "fbeta",
+            "gbeta",
         ),
         help="Name of dev metric to determine best checkpoint.",
     )
@@ -385,8 +418,16 @@ def get_args():
             "mape",
             "precision",
             "recall",
+            "fbeta",
+            "gbeta",
         ),
         help="List of metrics for evaluation of classification problems",
+    )
+    parser.add_argument(
+        "--find_threshold_on",
+        type=str,
+        default=None,
+        help="Which metric to maximize for cutoff thresholding."
     )
     parser.add_argument(
         "--lr_init", type=float, default="0.01", help="Initial learning rate."
@@ -433,8 +474,9 @@ def get_args():
     )
     parser.add_argument(
         "--pos_weight",
-        default=1.0,
+        default=None,
         type=float,
+        nargs='+',
         help="Weight for positive class in BCE loss.",
     )
     parser.add_argument(

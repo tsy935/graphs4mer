@@ -1789,6 +1789,7 @@ class S4Model(nn.Module):
         pool_stride=1,
         pool_expand=1,
         temporal_pool=None,
+        use_lengths=False,
         **kernel_args,
     ):
         super().__init__()
@@ -1833,13 +1834,16 @@ class S4Model(nn.Module):
 
         # Linear decoder
         if add_decoder:
-            self.decoder = SequenceDecoder(
-                d_model=d_model,
-                d_output=d_output,
-                l_output=l_output,
-                use_lengths=False,
-                mode=temporal_pool,
-            )
+            if temporal_pool == 'mean':
+                self.decoder = nn.Linear(d_model, d_output)
+            else:
+                self.decoder = SequenceDecoder(
+                    d_model=d_model,
+                    d_output=d_output,
+                    l_output=l_output,
+                    use_lengths=use_lengths,
+                    mode=temporal_pool,
+                )
 
     def forward(self, x, lengths=None):
         """
@@ -1877,17 +1881,23 @@ class S4Model(nn.Module):
 
         x = x.transpose(-1, -2)  # (B, L, d_model)
 
-        # # Pooling: average pooling over the sequence length
-        # if self.temporal_pool == "mean":
-        #     x = x.mean(dim=1)
-        # elif self.temporal_pool == "last":
-        #     x = x[:, -1, :]
-        # elif self.temporal_pool is None:
-        #     pass
-
         # Decode the outputs
         if self.add_decoder:
-            x = self.decoder(x)  # (B, L, d_model) -> (B, L_out, d_output)
+            if self.temporal_pool == 'mean':
+                if lengths is None:
+                    x = torch.mean(x, dim=1) # (B, d_model)
+                else:
+                    x = torch.stack(
+                        [
+                            torch.mean(out[:length, :], dim=0)
+                            for out, length in zip(torch.unbind(x, dim=0), lengths)
+                        ],
+                        dim=0,
+                    ) # (B, d_model)
+                    x = self.decoder(x)
+            else:
+                x = self.decoder(x)  # (B, L, d_model) -> (B, L_out, d_output)
+
             if x.shape[1] == 1:
                 x = x.squeeze(1)
 

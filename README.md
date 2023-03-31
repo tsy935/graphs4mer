@@ -17,7 +17,15 @@ python data/preprocess/resample_tuh.py --raw_edf_dir {dir-to-tusz-edf-files} --s
 ```
 
 ### DOD-H
-The DOD-H dataset is publicly available and can be downloaded from this [repo](https://github.com/Dreem-Organization/dreem-learning-open). 
+The DOD-H dataset is publicly available and can be downloaded from this [repo](https://github.com/Dreem-Organization/dreem-learning-open).
+
+### ICBEB
+The ICBEB dataset is publicly available and can be downloaded using this [script](https://github.com/helme/ecg_ptbxl_benchmarking/blob/master/get_datasets.sh) from this [repo](https://github.com/helme/ecg_ptbxl_benchmarking).
+#### ICBEB data preprocessing
+We will follow this [repo](https://github.com/helme/ecg_ptbxl_benchmarking) to split the ICBEB dataset into train/validation/test sets, downsample the ECGs to 100 Hz, and obtain nine ECG class labels. To do so, run:
+```
+python data/preprocess/preprocess_icbeb.py --raw_data_dir <raw-icbeb-data-dir> --output_dir <icbeb-data-dir> --sampling_freq 100
+```
 
 ### PEMS-BAY
 The PEMS-BAY dataset is publicly available and can be downloaded from this [repo](https://github.com/liyaguang/DCRNN).
@@ -36,6 +44,12 @@ Note that the first time when you run this script, it will first preprocess the 
 To train GraphS4mer on the DOD-H dataset, specify `<dir-to-dodh-data>` and `<your-save-dir>` in `scripts/run_dodh.sh`, then run:
 ```
 bash ./scripts/run_dodh.sh
+```
+
+### Model training on ICBEB dataset
+To train GraphS4mer on the ICBEB dataset, specify `<icbeb-data-dir>` and `<your-save-dir>` in `scripts/run_icbeb.sh`, then run:
+```
+bash ./scripts/run_icbeb.sh
 ```
 
 ### Model training on PEMS-BAY dataset

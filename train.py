@@ -9,9 +9,9 @@ import torch.optim as optim
 import pandas as pd
 
 from data.datamodules.datamodule_tuh import TUH_DataModule
+from data.datamodules.datamodule_icbeb import ICBEB_DataModule
 from data.datamodules.datamodule_traffic import Traffic_DataModule
 from data.datamodules.datamodule_dreem import Dreem_DataModule
-
 from args import get_args
 import torch
 from model.graphs4mer import *
@@ -24,7 +24,7 @@ import utils.utils as utils
 from utils.schedulers import *
 from tqdm import tqdm
 from dotted_dict import DottedDict
-from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, OneCycleLR, MultiStepLR
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import (
     LearningRateMonitor,
@@ -71,6 +71,8 @@ class PLModel(pl.LightningModule):
         )
         if args.dataset == "tuh":
             args.max_seq_len *= TUH_FREQUENCY
+        elif args.dataset == "icbeb":
+            args.max_seq_len = 60 * args.sampling_freq  # hard-coded
         elif args.dataset == "dodh":
             args.max_seq_len *= args.sampling_freq
         if args.model_name.lower() == "graphs4mer":
@@ -79,12 +81,12 @@ class PLModel(pl.LightningModule):
                     input_dim=args.input_dim,
                     num_nodes=args.num_nodes,
                     dropout=args.dropout,
-                    num_temporal_layers=args.num_temporal_layers,
                     g_conv=args.g_conv,
                     num_gnn_layers=args.num_gcn_layers,
                     hidden_dim=args.hidden_dim,
                     max_seq_len=args.max_seq_len,
                     resolution=args.resolution,
+                    num_temporal_layers=args.num_temporal_layers,
                     state_dim=args.state_dim,
                     channels=args.channels,
                     temporal_model=args.temporal_model,
@@ -107,20 +109,24 @@ class PLModel(pl.LightningModule):
                     K=args.knn,
                     regularizations=args.regularizations,
                     residual_weight=args.residual_weight,
+                    decay_residual_weight=args.decay_residual_weight,
                 )
+                if args.freeze_s4:
+                    assert (args.s4_pretrained_dir is not None)
+                    self.model = self._freeze_s4(self.model)
             else:
                 self.model = GraphS4mer_Regression(
                     input_dim=args.input_dim,
                     output_dim=args.output_dim,
                     num_nodes=args.num_nodes,
                     dropout=args.dropout,
-                    num_temporal_layers=args.num_temporal_layers,
                     g_conv=args.g_conv,
                     num_gnn_layers=args.num_gcn_layers,
                     hidden_dim=args.hidden_dim,
                     max_seq_len=args.max_seq_len,
                     output_seq_len=args.output_seq_len,
                     resolution=args.resolution,
+                    num_temporal_layers=args.num_temporal_layers,
                     state_dim=args.state_dim,
                     channels=args.channels,
                     temporal_model=args.temporal_model,
@@ -131,8 +137,8 @@ class PLModel(pl.LightningModule):
                     adj_embed_dim=args.adj_embed_dim,
                     gin_mlp=args.gin_mlp,
                     train_eps=args.train_eps,
-                    graph_pool=args.graph_pool,
                     prune_method=args.prune_method,
+                    graph_pool=args.graph_pool,
                     edge_top_perc=args.edge_top_perc,
                     thresh=args.thresh,
                     activation_fn=args.activation_fn,
@@ -197,7 +203,9 @@ class PLModel(pl.LightningModule):
         elif args.model_name.lower() == "s4":
             self.model = S4Model(
                 d_input=args.num_nodes * args.input_dim,
-                d_output=args.output_dim if (args.task != "regression") else (args.output_dim * args.num_nodes),
+                d_output=args.output_dim
+                if (args.dataset != "pems_bay")
+                else (args.output_dim * args.num_nodes),
                 d_model=args.hidden_dim,
                 d_state=args.state_dim,
                 n_layers=args.num_temporal_layers,
@@ -206,17 +214,20 @@ class PLModel(pl.LightningModule):
                 l_max=args.max_seq_len,
                 l_output=args.output_seq_len,
                 bidirectional=args.bidirectional,
-                postact=args.postact,  # none or 'glu'
+                postact=args.postact,
                 add_decoder=True,
-                pool=False,  # hard-coded
+                pool=False,
                 temporal_pool=args.temporal_pool,
+                use_lengths=True if (args.dataset=='icbeb') else False,
             )
         elif args.model_name.lower() == "lstm":
             self.model = LSTMModel(
                 input_dim=args.num_nodes * args.input_dim,
                 hidden_dim=args.hidden_dim,
                 num_rnn_layers=args.num_temporal_layers,
-                output_dim=args.output_dim if (args.task != "regression") else (args.output_dim * args.num_nodes),
+                output_dim=args.output_dim
+                if (args.dataset != "pems_bay")
+                else (args.output_dim * args.num_nodes),
                 output_seq_len=args.output_seq_len,
                 temporal_pool=args.temporal_pool,
                 dropout=args.dropout,
@@ -241,10 +252,12 @@ class PLModel(pl.LightningModule):
         return reg_loss
 
     def training_step(self, batch, batch_idx):
-        logits, y, cls_loss, reg_loss, _, _, _ = self._shared_step(batch)
+        logits, y, cls_loss, reg_loss, _, _, _, _ = self._shared_step(
+            batch, batch_idx=batch_idx
+        )
 
         log_dict = {}
-        if "graphs4mer" in self.args.model_name:
+        if ("graphs4mer" in self.args.model_name):
             loss = cls_loss + reg_loss
             log_dict["{}train/reg_loss".format(self.log_prefix)] = reg_loss.item()
         else:
@@ -266,7 +279,7 @@ class PLModel(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
 
-        logits, y, cls_loss, reg_loss, file_names, _, _ = self._shared_step(batch)
+        logits, y, cls_loss, reg_loss, file_names, _, _, _ = self._shared_step(batch)
 
         return {
             "labels": y,
@@ -281,7 +294,7 @@ class PLModel(pl.LightningModule):
 
         log_dict = {}
 
-        if "graphs4mer" in self.args.model_name:
+        if ("graphs4mer" in self.args.model_name):
             reg_loss = torch.mean(
                 torch.stack([output["reg_loss"] for output in outputs])
             )
@@ -291,32 +304,49 @@ class PLModel(pl.LightningModule):
                 cls_loss = F.binary_cross_entropy_with_logits(
                     logits,
                     labels,
-                    pos_weight=torch.FloatTensor([self.args.pos_weight]).to(
+                    pos_weight=torch.FloatTensor(self.args.pos_weight).to(
                         self.device
-                    ),
+                    ) if (self.args.pos_weight is not None) else None,
                 )
                 probs = torch.sigmoid(logits).cpu().numpy()
                 preds = (probs > 0.5).astype(int)
             else:
-                cls_loss = F.cross_entropy(logits, labels.long())
-                probs = torch.softmax(logits, dim=-1).cpu().numpy()
-                preds = np.argmax(probs, axis=-1)
-            scores_dict = utils.eval_dict(
+                if (self.args.dataset == "icbeb"):  # multilabel
+                    cls_loss = F.binary_cross_entropy_with_logits(
+                        logits,
+                        labels,
+                        pos_weight = torch.FloatTensor(self.args.pos_weight).to(
+                            self.device
+                        ) if (self.args.pos_weight is not None) else None,
+                    )
+                    probs = torch.sigmoid(logits).cpu().numpy()
+                    preds = (probs > 0.5).astype(int)
+                else:
+                    cls_loss = F.cross_entropy(logits, labels.long())
+                    probs = torch.softmax(logits, dim=-1).cpu().numpy()
+                    preds = np.argmax(probs, axis=-1)
+            scores_dict, _ = utils.eval_dict(
                 y_pred=preds,
                 y=labels.cpu().numpy(),
                 y_prob=probs,
                 average=self.args.metric_avg,
                 metrics=self.args.eval_metrics,
+                find_threshold_on=self.args.find_threshold_on,
             )
-        else:
-            cls_loss = F.l1_loss(logits, labels, reduction="mean")  # MAE loss
-            scores_dict = utils.eval_dict(
-                y_pred=logits.cpu().numpy(),
-                y=labels.cpu().numpy(),
+        else: # forecasting
+            cls_loss = utils.masked_mae_loss(y_pred=logits, y_true=labels, null_val=0.0)
+
+            # note: evaluate MAE only on specified horizon
+            y_pred = logits.cpu().numpy()[:, :, self.args.horizon - 1]
+            y_true = labels.cpu().numpy()[:, :, self.args.horizon - 1]
+            scores_dict, _ = utils.eval_dict(
+                y_pred=y_pred,
+                y=y_true,
                 metrics=self.args.eval_metrics,
+                null_val=0.0,
             )
 
-        if "graphs4mer" in self.args.model_name:
+        if ("graphs4mer" in self.args.model_name):
             loss = cls_loss + reg_loss
             log_dict["{}val/reg_loss".format(self.log_prefix)] = reg_loss.item()
         else:
@@ -349,6 +379,7 @@ class PLModel(pl.LightningModule):
             file_names,
             raw_attn_weight,
             adj_mat_learned,
+            features
         ) = self._shared_step(batch)
         return {
             "labels": y,
@@ -357,9 +388,13 @@ class PLModel(pl.LightningModule):
             "file_names": file_names,
             "raw_attn_weight": raw_attn_weight,
             "adj_mat_learned": adj_mat_learned,
+            "features": features,
         }
 
     def test_epoch_end(self, outputs):
+        thresholds = None
+        find_threshold = False
+        find_threshold_on = None
 
         for curr_outputs in outputs:
             logits = torch.cat([output["logits"] for output in curr_outputs]).squeeze()
@@ -373,30 +408,48 @@ class PLModel(pl.LightningModule):
                     cls_loss = F.binary_cross_entropy_with_logits(
                         logits,
                         labels,
-                        pos_weight=torch.FloatTensor([self.args.pos_weight]).to(
+                        pos_weight=torch.FloatTensor(self.args.pos_weight).to(
                             self.device
-                        ),
+                        ) if (self.args.pos_weight is not None) else None,
                     )
                     probs = torch.sigmoid(logits).cpu().numpy()
                     preds = (probs > 0.5).astype(int)
                 else:
-                    cls_loss = F.cross_entropy(logits, labels.long())
-                    probs = torch.softmax(logits, dim=-1).cpu().numpy()
-                    preds = np.argmax(probs, axis=-1)
+                    if (self.args.dataset == "icbeb"):  # multilabel
+                        cls_loss = F.binary_cross_entropy_with_logits(
+                            logits,
+                            labels,
+                        )
+                        probs = torch.sigmoid(logits).cpu().numpy()
+                        preds = (probs > 0.5).astype(int)
+                        if prefix == "val" and (self.args.dataset == "icbeb"):
+                            find_threshold_on = self.args.find_threshold_on
+                        else:
+                            find_threshold_on = None
+                    else:
+                        cls_loss = F.cross_entropy(logits, labels.long())
+                        probs = torch.softmax(logits, dim=-1).cpu().numpy()
+                        preds = np.argmax(probs, axis=-1)
 
-                scores_dict = utils.eval_dict(
+                scores_dict, thresholds = utils.eval_dict(
                     y_pred=preds,
                     y=labels.cpu().numpy(),
                     y_prob=probs,
                     average=self.args.metric_avg,
                     metrics=self.args.eval_metrics,
+                    find_threshold_on=find_threshold_on,
+                    thresholds=thresholds,
                 )
             else:
                 # regression tasks
-                scores_dict = utils.eval_dict(
-                    y_pred=logits.cpu().numpy(),
-                    y=labels.cpu().numpy(),
+                # NOTE: evaluate MAE only on specified horizon
+                y_pred = logits.cpu().numpy()[:, :, self.args.horizon - 1]
+                y_true = labels.cpu().numpy()[:, :, self.args.horizon - 1]
+                scores_dict, _ = utils.eval_dict(
+                    y_pred=y_pred,
+                    y=y_true,
                     metrics=self.args.eval_metrics,
+                    null_val=0.0,
                 )
 
             # log
@@ -431,37 +484,68 @@ class PLModel(pl.LightningModule):
                     "labels": labels,
                     "file_names": file_names,
                 }
-                if "self_attention" in self.args.model_name:
-                    raw_attn_weight = torch.cat(
-                        [output["raw_attn_weight"] for output in curr_outputs]
-                    )
-                    adj_mat_learned = torch.cat(
-                        [output["adj_mat_learned"] for output in curr_outputs]
-                    )
-                    outputs_dict["raw_attn_weight"] = raw_attn_weight
-                    outputs_dict["adj_mat_learned"] = adj_mat_learned
-
                 with open(
                     os.path.join(self.args.save_dir, "{}_results.pkl".format(prefix)),
                     "wb",
                 ) as pf:
                     pickle.dump(outputs_dict, pf)
+            if self.args.save_attn_weights:
+                raw_attn_weight = torch.cat(
+                    [output["raw_attn_weight"] for output in curr_outputs]
+                )
+                adj_mat_learned = torch.cat(
+                    [output["adj_mat_learned"] for output in curr_outputs]
+                )
+                features = torch.cat(
+                    [output["features"] for output in curr_outputs]
+                )
+                outputs_dict = {}
+                outputs_dict["raw_attn_weight"] = raw_attn_weight
+                outputs_dict["adj_mat_learned"] = adj_mat_learned
+                outputs_dict["features"] = features
 
-    def _shared_step(self, batch):
+                with open(
+                    os.path.join(
+                        self.args.save_dir, "{}_attention_weights.pkl".format(prefix)
+                    ),
+                    "wb",
+                ) as pf:
+                    pickle.dump(outputs_dict, pf)
+
+    def _shared_step(self, batch, batch_idx=None):
         y = batch.y
         if y.shape[-1] == 1:
             y = y.view(-1)
 
+        if self.args.dataset == "icbeb":  # variable lengths
+            seq_len = batch.seq_len
+        else:
+            seq_len = None
+
+        if self.args.dataset == "pems_bay":
+            y = y[..., : self.args.output_seq_len, : self.args.output_dim]
+
         raw_attn_weight = []
         adj_mat_learned = []
+        features = []
         reg_loss = None
-        if "graphs4mer" in self.args.model_name:
-            if self.args.save_output:
-                logits, reg_loss_dict, raw_attn_weight, adj_mat_learned = self.model(
-                    batch, return_attention=True
+        if ("graphs4mer" in self.args.model_name):
+            if self.args.save_attn_weights:
+                logits, reg_loss_dict, raw_attn_weight, adj_mat_learned, features = self.model(
+                    batch, 
+                    return_attention=True, 
+                    lengths=seq_len,
+                    epoch=self.current_epoch, 
+                    epoch_total=self.args.num_epochs,
                 )
             else:
-                logits, reg_loss_dict = self.model(batch, return_attention=False)
+                logits, reg_loss_dict = self.model(
+                    batch,
+                    return_attention=False, 
+                    lengths=seq_len, 
+                    epoch=self.current_epoch, 
+                    epoch_total=self.args.num_epochs,
+                )
 
             reg_loss = self._aggregate_regularization_losses(reg_loss_dict)
         elif self.args.model_name == "s4" or self.args.model_name == "lstm":
@@ -477,9 +561,9 @@ class PLModel(pl.LightningModule):
                     -1, self.args.max_seq_len, self.args.num_nodes * self.args.input_dim
                 )
             )  # (batch, seq_len, num_nodes*input_dim)
-            logits = self.model(x)
+            logits = self.model(x, lengths=seq_len)
         else:
-            logits = self.model(batch)
+            logits = self.model(batch, lengths=seq_len)
 
         if self.args.task == "classification":
             # classification task
@@ -487,41 +571,53 @@ class PLModel(pl.LightningModule):
                 cls_loss = F.binary_cross_entropy_with_logits(
                     logits.view(-1),
                     y,
-                    pos_weight=torch.FloatTensor([self.args.pos_weight]).to(
+                    pos_weight=torch.FloatTensor(self.args.pos_weight).to(
                         self.device
-                    ),
+                    ) if (self.args.pos_weight is not None) else None,
                 )
             else:
-                cls_loss = F.cross_entropy(logits, y.long())
+                if (self.args.dataset == "icbeb"):  # multilabel
+                    cls_loss = F.binary_cross_entropy_with_logits(
+                        logits,
+                        y,
+                        pos_weight = torch.FloatTensor(self.args.pos_weight).to(
+                            self.device
+                        ) if (self.args.pos_weight is not None) else None,
+                    )
+                else:
+                    cls_loss = F.cross_entropy(logits, y.long())
         else:
             # regression task
-            y = y.reshape(
-                -1, self.args.num_nodes, self.args.max_seq_len, self.args.input_dim
-            )  # (batch, num_nodes, seq_len, input_dim)
-            y = y[
-                ..., : self.args.output_dim
-            ]  # (batch, num_nodes, seq_len, output_dim)
-
-            if self.args.model_name == "s4" or self.args.model_name == "lstm":
-                logits = logits.reshape(
+            if self.args.dataset == "pems_bay":
+                y = y.reshape(
                     -1,
-                    self.args.max_seq_len,
                     self.args.num_nodes,
+                    self.args.output_seq_len,
                     self.args.output_dim,
-                ).transpose(
-                    1, 2
-                )  # (batch, num_nodes, seq_len, output_dim)
+                )  # (batch, num_nodes, output_seq_len, output_dim)
+
+                if self.args.model_name == "s4" or self.args.model_name == "lstm":
+                    logits = logits.reshape(
+                        -1,
+                        self.args.output_seq_len,
+                        self.args.num_nodes,
+                        self.args.output_dim,
+                    ).transpose(
+                        1, 2
+                    )  # (batch, num_nodes, seq_len, output_dim)
+                else:
+                    logits = logits.reshape(
+                        -1,
+                        self.args.num_nodes,
+                        self.args.output_seq_len,
+                        self.args.output_dim,
+                    )  # (batch, num_nodes, seq_len, output_dim)
+
+                logits = self.scaler.inverse_transform(logits)
+                y = self.scaler.inverse_transform(y)
+                cls_loss = utils.masked_mae_loss(y_pred=logits, y_true=y, null_val=0.0)
             else:
-                logits = logits.reshape(
-                    -1,
-                    self.args.num_nodes,
-                    self.args.max_seq_len,
-                    self.args.output_dim,
-                )  # (batch, num_nodes, seq_len, output_dim)
-
-            logits = self.scaler.inverse_transform(logits)
-            y = self.scaler.inverse_transform(y)
-            cls_loss = F.l1_loss(logits, y, reduction="mean")  # MAE loss
+                cls_loss = utils.masked_mae_loss(y_pred=logits.squeeze(), y_true=y)
 
         return (
             logits,
@@ -531,12 +627,38 @@ class PLModel(pl.LightningModule):
             batch.writeout_fn,
             raw_attn_weight,
             adj_mat_learned,
+            features,
         )
+
+    def _freeze_s4(self, model):
+        print("Loading S4 pretrained weights...")
+        with open(os.path.join(self.args.s4_pretrained_dir, "args.json"), "r") as jf:
+            args = json.load(jf)
+        args = DottedDict(args)
+
+        checkpoint_file = [fn for fn in os.listdir(self.args.s4_pretrained_dir) if ".ckpt" in fn][0]
+        checkpoint_file = os.path.join(self.args.s4_pretrained_dir, checkpoint_file)
+        checkpoint = torch.load(checkpoint_file)
+        state_dict = checkpoint["state_dict"]
+        state_dict = {k.split("model.")[-1]:v for k,v in state_dict.items()}
+        # remove encoder and decoder
+        state_dict = {k:v for k,v in state_dict.items() if ("encoder" not in k) and ("decoder" not in k)}
+        # load state dict
+        model.t_model.load_state_dict(state_dict, strict=False)
+        # freeze pretrained
+        for name, param in model.t_model.named_parameters():
+            if "encoder" in name:
+                continue
+            param.requires_grad = False
+        
+        return model
 
     def configure_optimizers(self):
         if self.optimizer_name == "adam":
             optimizer = optim.Adam(
-                params=self.parameters(), lr=self.lr, weight_decay=self.weight_decay
+                params=self.parameters(),
+                lr=self.lr,
+                weight_decay=self.weight_decay,
             )
         elif self.optimizer_name == "adamw":
             optimizer = optim.AdamW(
@@ -591,7 +713,19 @@ def main(args):
             test_batch_size=args.test_batch_size,
             num_workers=args.num_workers,
             adj_mat_dir=args.adj_mat_dir,
-            standardize=False, # TODO: revert this!!
+            standardize=True,
+            balanced_sampling=args.balanced_sampling,
+            pin_memory=True,
+        )
+    elif args.dataset == "icbeb":
+        datamodule = ICBEB_DataModule(
+            raw_data_dir=args.raw_data_dir,
+            num_nodes=args.num_nodes,
+            train_batch_size=args.train_batch_size,
+            test_batch_size=args.test_batch_size,
+            num_workers=args.num_workers,
+            adj_mat_dir=args.adj_mat_dir,
+            sampling_freq=args.sampling_freq,
             balanced_sampling=args.balanced_sampling,
             pin_memory=True,
         )
