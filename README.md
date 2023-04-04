@@ -1,6 +1,6 @@
-# Spatiotemporal Modeling of Multivariate Signals With Graph Neural Networks and Structured State Space Models
+# Modeling Multivariate Biosignals With Graph Neural Networks and Structured State Space Models
 
-Siyi Tang, Jared A. Dunnmon, Liangqiong Qu, Khaled K. Saab, Christopher Lee-Messer, Daniel L. Rubin. *arXiv*. https://arxiv.org/abs/2211.11176
+Siyi Tang, Jared A. Dunnmon, Liangqiong Qu, Khaled K. Saab, Tina Baykaner, Christopher Lee-Messer, Daniel L. Rubin. *arXiv*. https://arxiv.org/abs/2211.11176
 
 ---
 ## Setup
@@ -27,9 +27,6 @@ We will follow this [repo](https://github.com/helme/ecg_ptbxl_benchmarking) to s
 python data/preprocess/preprocess_icbeb.py --raw_data_dir <raw-icbeb-data-dir> --output_dir <icbeb-data-dir> --sampling_freq 100
 ```
 
-### PEMS-BAY
-The PEMS-BAY dataset is publicly available and can be downloaded from this [repo](https://github.com/liyaguang/DCRNN).
-
 ---
 ## Model Training
 `scripts` folder shows examples to train GraphS4mer on the three datasets. These scripts have been tested on a single NVIDIA A100 GPU and a single NVIDIA TITAN RTX GPU. If you have a GPU with smaller memory, you can decrease the batch size and set `accumulate_grad_batches` to a value > 1. 
@@ -51,13 +48,6 @@ To train GraphS4mer on the ICBEB dataset, specify `<icbeb-data-dir>` and `<your-
 ```
 bash ./scripts/run_icbeb.sh
 ```
-
-### Model training on PEMS-BAY dataset
-To train GraphS4mer on the PEMS-BAY dataset, specify `<dir-to-pemsbay-data>` and `<your-save-dir>` in `scripts/run_pemsbay.sh`, then run:
-```
-bash ./scripts/run_pemsbay.sh
-```
-
 ---
 ## Updates
 * 2023-03: Traffic forecasting related experiments have been moved to the branch `traffic`.
@@ -66,10 +56,10 @@ bash ./scripts/run_pemsbay.sh
 ## Reference
 If you use this codebase, or otherwise find our work valuable, please cite:
 ```
-@misc{tang2022spatiotemporal,
-      title={Spatiotemporal Modeling of Multivariate Signals With Graph Neural Networks and Structured State Space Models}, 
-      author={Siyi Tang and Jared A. Dunnmon and Liangqiong Qu and Khaled K. Saab and Christopher Lee-Messer and Daniel L. Rubin},
-      year={2022},
+@misc{tang2023modeling,
+      title={Modeling Multivariate Biosignals With Graph Neural Networks and Structured State Space Models}, 
+      author={Siyi Tang and Jared A. Dunnmon and Liangqiong Qu and Khaled K. Saab and Tina Baykaner and Christopher Lee-Messer and Daniel L. Rubin},
+      year={2023},
       eprint={2211.11176},
       archivePrefix={arXiv},
       primaryClass={cs.LG}
