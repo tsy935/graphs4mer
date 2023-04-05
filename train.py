@@ -10,7 +10,6 @@ import pandas as pd
 
 from data.datamodules.datamodule_tuh import TUH_DataModule
 from data.datamodules.datamodule_icbeb import ICBEB_DataModule
-from data.datamodules.datamodule_traffic import Traffic_DataModule
 from data.datamodules.datamodule_dreem import Dreem_DataModule
 from args import get_args
 import torch
@@ -66,9 +65,7 @@ class PLModel(pl.LightningModule):
 
     def _build_model(self):
         args = self.args
-        undirected_graph = (
-            False if (args.dataset == "pems_bay") else True
-        )
+        undirected_graph = args.undirected_graph
         if args.dataset == "tuh":
             args.max_seq_len *= TUH_FREQUENCY
         elif args.dataset == "icbeb":
@@ -76,136 +73,73 @@ class PLModel(pl.LightningModule):
         elif args.dataset == "dodh":
             args.max_seq_len *= args.sampling_freq
         if args.model_name.lower() == "graphs4mer":
-            if args.task == "classification":
-                self.model = GraphS4mer(
-                    input_dim=args.input_dim,
-                    num_nodes=args.num_nodes,
-                    dropout=args.dropout,
-                    g_conv=args.g_conv,
-                    num_gnn_layers=args.num_gcn_layers,
-                    hidden_dim=args.hidden_dim,
-                    max_seq_len=args.max_seq_len,
-                    resolution=args.resolution,
-                    num_temporal_layers=args.num_temporal_layers,
-                    state_dim=args.state_dim,
-                    channels=args.channels,
-                    temporal_model=args.temporal_model,
-                    bidirectional=args.bidirectional,
-                    temporal_pool=args.temporal_pool,
-                    prenorm=args.prenorm,
-                    postact=args.postact,
-                    metric=args.graph_learn_metric,
-                    adj_embed_dim=args.adj_embed_dim,
-                    gin_mlp=args.gin_mlp,
-                    train_eps=args.train_eps,
-                    prune_method=args.prune_method,
-                    edge_top_perc=args.edge_top_perc,
-                    thresh=args.thresh,
-                    graph_pool=args.graph_pool,
-                    activation_fn=args.activation_fn,
-                    num_classes=args.output_dim,
-                    undirected_graph=undirected_graph,
-                    use_prior=args.use_prior,
-                    K=args.knn,
-                    regularizations=args.regularizations,
-                    residual_weight=args.residual_weight,
-                    decay_residual_weight=args.decay_residual_weight,
-                )
-                if args.freeze_s4:
-                    assert (args.s4_pretrained_dir is not None)
-                    self.model = self._freeze_s4(self.model)
-            else:
-                self.model = GraphS4mer_Regression(
-                    input_dim=args.input_dim,
-                    output_dim=args.output_dim,
-                    num_nodes=args.num_nodes,
-                    dropout=args.dropout,
-                    g_conv=args.g_conv,
-                    num_gnn_layers=args.num_gcn_layers,
-                    hidden_dim=args.hidden_dim,
-                    max_seq_len=args.max_seq_len,
-                    output_seq_len=args.output_seq_len,
-                    resolution=args.resolution,
-                    num_temporal_layers=args.num_temporal_layers,
-                    state_dim=args.state_dim,
-                    channels=args.channels,
-                    temporal_model=args.temporal_model,
-                    bidirectional=args.bidirectional,
-                    prenorm=args.prenorm,
-                    postact=args.postact,
-                    metric=args.graph_learn_metric,
-                    adj_embed_dim=args.adj_embed_dim,
-                    gin_mlp=args.gin_mlp,
-                    train_eps=args.train_eps,
-                    prune_method=args.prune_method,
-                    graph_pool=args.graph_pool,
-                    edge_top_perc=args.edge_top_perc,
-                    thresh=args.thresh,
-                    activation_fn=args.activation_fn,
-                    undirected_graph=undirected_graph,
-                    use_prior=args.use_prior,
-                    K=args.knn,
-                    regularizations=args.regularizations,
-                    residual_weight=args.residual_weight,
-                )
+            self.model = GraphS4mer(
+                input_dim=args.input_dim,
+                num_nodes=args.num_nodes,
+                dropout=args.dropout,
+                g_conv=args.g_conv,
+                num_gnn_layers=args.num_gcn_layers,
+                hidden_dim=args.hidden_dim,
+                max_seq_len=args.max_seq_len,
+                resolution=args.resolution,
+                num_temporal_layers=args.num_temporal_layers,
+                state_dim=args.state_dim,
+                channels=args.channels,
+                temporal_model=args.temporal_model,
+                bidirectional=args.bidirectional,
+                temporal_pool=args.temporal_pool,
+                prenorm=args.prenorm,
+                postact=args.postact,
+                metric=args.graph_learn_metric,
+                adj_embed_dim=args.adj_embed_dim,
+                gin_mlp=args.gin_mlp,
+                train_eps=args.train_eps,
+                prune_method=args.prune_method,
+                edge_top_perc=args.edge_top_perc,
+                thresh=args.thresh,
+                graph_pool=args.graph_pool,
+                activation_fn=args.activation_fn,
+                num_classes=args.output_dim,
+                undirected_graph=undirected_graph,
+                use_prior=args.use_prior,
+                K=args.knn,
+                regularizations=args.regularizations,
+                residual_weight=args.residual_weight,
+                decay_residual_weight=args.decay_residual_weight,
+            )
+            if args.freeze_s4:
+                assert (args.s4_pretrained_dir is not None)
+                self.model = self._freeze_s4(self.model)
         elif args.model_name.lower() == "temporal_gnn":
-            if args.task == "classification":
-                self.model = TemporalGNN(
-                    input_dim=args.input_dim,
-                    num_nodes=args.num_nodes,
-                    dropout=args.dropout,
-                    g_conv=args.g_conv,
-                    num_gnn_layers=args.num_gcn_layers,
-                    hidden_dim=args.hidden_dim,
-                    max_seq_len=args.max_seq_len,
-                    num_temporal_layers=args.num_temporal_layers,
-                    state_dim=args.state_dim,
-                    channels=args.channels,
-                    temporal_model=args.temporal_model,
-                    bidirectional=args.bidirectional,
-                    temporal_pool=args.temporal_pool,
-                    prenorm=args.prenorm,
-                    postact=args.postact,
-                    gin_mlp=args.gin_mlp,
-                    train_eps=args.train_eps,
-                    graph_pool=args.graph_pool,
-                    activation_fn=args.activation_fn,
-                    num_classes=args.output_dim,
-                    undirected_graph=undirected_graph,
-                    use_prior=args.use_prior,
-                    K=args.knn,
-                )
-            else:
-                self.model = TemporalGNN_Regression(
-                    input_dim=args.input_dim,
-                    output_dim=args.output_dim,
-                    num_nodes=args.num_nodes,
-                    dropout=args.dropout,
-                    g_conv=args.g_conv,
-                    num_gnn_layers=args.num_gcn_layers,
-                    hidden_dim=args.hidden_dim,
-                    max_seq_len=args.max_seq_len,
-                    output_seq_len=args.output_seq_len,
-                    num_temporal_layers=args.num_temporal_layers,
-                    state_dim=args.state_dim,
-                    channels=args.channels,
-                    temporal_model=args.temporal_model,
-                    bidirectional=args.bidirectional,
-                    prenorm=args.prenorm,
-                    postact=args.postact,
-                    gin_mlp=args.gin_mlp,
-                    train_eps=args.train_eps,
-                    activation_fn=args.activation_fn,
-                    undirected_graph=undirected_graph,
-                    use_prior=args.use_prior,
-                    K=args.knn,
-                )
+            self.model = TemporalGNN(
+                input_dim=args.input_dim,
+                num_nodes=args.num_nodes,
+                dropout=args.dropout,
+                g_conv=args.g_conv,
+                num_gnn_layers=args.num_gcn_layers,
+                hidden_dim=args.hidden_dim,
+                max_seq_len=args.max_seq_len,
+                num_temporal_layers=args.num_temporal_layers,
+                state_dim=args.state_dim,
+                channels=args.channels,
+                temporal_model=args.temporal_model,
+                bidirectional=args.bidirectional,
+                temporal_pool=args.temporal_pool,
+                prenorm=args.prenorm,
+                postact=args.postact,
+                gin_mlp=args.gin_mlp,
+                train_eps=args.train_eps,
+                graph_pool=args.graph_pool,
+                activation_fn=args.activation_fn,
+                num_classes=args.output_dim,
+                undirected_graph=undirected_graph,
+                use_prior=args.use_prior,
+                K=args.knn,
+            )
         elif args.model_name.lower() == "s4":
             self.model = S4Model(
                 d_input=args.num_nodes * args.input_dim,
-                d_output=args.output_dim
-                if (args.dataset != "pems_bay")
-                else (args.output_dim * args.num_nodes),
+                d_output=args.output_dim,
                 d_model=args.hidden_dim,
                 d_state=args.state_dim,
                 n_layers=args.num_temporal_layers,
@@ -225,9 +159,7 @@ class PLModel(pl.LightningModule):
                 input_dim=args.num_nodes * args.input_dim,
                 hidden_dim=args.hidden_dim,
                 num_rnn_layers=args.num_temporal_layers,
-                output_dim=args.output_dim
-                if (args.dataset != "pems_bay")
-                else (args.output_dim * args.num_nodes),
+                output_dim=args.output_dim,
                 output_seq_len=args.output_seq_len,
                 temporal_pool=args.temporal_pool,
                 dropout=args.dropout,
@@ -333,18 +265,8 @@ class PLModel(pl.LightningModule):
                 metrics=self.args.eval_metrics,
                 find_threshold_on=self.args.find_threshold_on,
             )
-        else: # forecasting
-            cls_loss = utils.masked_mae_loss(y_pred=logits, y_true=labels, null_val=0.0)
-
-            # note: evaluate MAE only on specified horizon
-            y_pred = logits.cpu().numpy()[:, :, self.args.horizon - 1]
-            y_true = labels.cpu().numpy()[:, :, self.args.horizon - 1]
-            scores_dict, _ = utils.eval_dict(
-                y_pred=y_pred,
-                y=y_true,
-                metrics=self.args.eval_metrics,
-                null_val=0.0,
-            )
+        else:
+            raise NotImplementedError
 
         if ("graphs4mer" in self.args.model_name):
             loss = cls_loss + reg_loss
@@ -441,16 +363,7 @@ class PLModel(pl.LightningModule):
                     thresholds=thresholds,
                 )
             else:
-                # regression tasks
-                # NOTE: evaluate MAE only on specified horizon
-                y_pred = logits.cpu().numpy()[:, :, self.args.horizon - 1]
-                y_true = labels.cpu().numpy()[:, :, self.args.horizon - 1]
-                scores_dict, _ = utils.eval_dict(
-                    y_pred=y_pred,
-                    y=y_true,
-                    metrics=self.args.eval_metrics,
-                    null_val=0.0,
-                )
+                raise NotImplementedError
 
             # log
             res_str = "{} - ".format(prefix)
@@ -522,9 +435,6 @@ class PLModel(pl.LightningModule):
         else:
             seq_len = None
 
-        if self.args.dataset == "pems_bay":
-            y = y[..., : self.args.output_seq_len, : self.args.output_dim]
-
         raw_attn_weight = []
         adj_mat_learned = []
         features = []
@@ -587,37 +497,7 @@ class PLModel(pl.LightningModule):
                 else:
                     cls_loss = F.cross_entropy(logits, y.long())
         else:
-            # regression task
-            if self.args.dataset == "pems_bay":
-                y = y.reshape(
-                    -1,
-                    self.args.num_nodes,
-                    self.args.output_seq_len,
-                    self.args.output_dim,
-                )  # (batch, num_nodes, output_seq_len, output_dim)
-
-                if self.args.model_name == "s4" or self.args.model_name == "lstm":
-                    logits = logits.reshape(
-                        -1,
-                        self.args.output_seq_len,
-                        self.args.num_nodes,
-                        self.args.output_dim,
-                    ).transpose(
-                        1, 2
-                    )  # (batch, num_nodes, seq_len, output_dim)
-                else:
-                    logits = logits.reshape(
-                        -1,
-                        self.args.num_nodes,
-                        self.args.output_seq_len,
-                        self.args.output_dim,
-                    )  # (batch, num_nodes, seq_len, output_dim)
-
-                logits = self.scaler.inverse_transform(logits)
-                y = self.scaler.inverse_transform(y)
-                cls_loss = utils.masked_mae_loss(y_pred=logits, y_true=y, null_val=0.0)
-            else:
-                cls_loss = utils.masked_mae_loss(y_pred=logits.squeeze(), y_true=y)
+            raise NotImplementedError
 
         return (
             logits,
@@ -729,17 +609,6 @@ def main(args):
             balanced_sampling=args.balanced_sampling,
             pin_memory=True,
         )
-    elif args.dataset == "pems_bay":
-        datamodule = Traffic_DataModule(
-            raw_data_dir=args.raw_data_dir,
-            adj_mat_dir=args.adj_mat_dir,
-            train_batch_size=args.train_batch_size,
-            test_batch_size=args.test_batch_size,
-            num_workers=args.num_workers,
-            standardize=True,
-            pin_memory=True,
-        )
-        scaler = datamodule.scaler
     elif args.dataset == "dodh":
         datamodule = Dreem_DataModule(
             raw_data_path=args.raw_data_dir,

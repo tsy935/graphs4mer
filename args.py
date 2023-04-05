@@ -189,6 +189,12 @@ def get_args():
         help="Pruning method for graph.",
     )
     parser.add_argument(
+        "--undirected_graph",
+        type=str2bool,
+        default=True,
+        help="Whether make the graph undirected."
+    )
+    parser.add_argument(
         "--thresh",
         type=float,
         default=None,
