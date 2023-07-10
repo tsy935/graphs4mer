@@ -1,6 +1,8 @@
 # Modeling Multivariate Biosignals With Graph Neural Networks and Structured State Space Models
 
-Siyi Tang, Jared A. Dunnmon, Liangqiong Qu, Khaled K. Saab, Tina Baykaner, Christopher Lee-Messer, Daniel L. Rubin. *arXiv*. https://arxiv.org/abs/2211.11176
+Siyi Tang, Jared A Dunnmon, Qu Liangqiong, Khaled K Saab, Tina Baykaner, Christopher Lee-Messer, Daniel L Rubin. *Proceedings of the Conference on Health, Inference, and Learning*, PMLR 209:50-71, 2023. (**Best Paper Award**)
+
+https://proceedings.mlr.press/v209/tang23a/tang23a.pdf
 
 ---
 ## Setup
