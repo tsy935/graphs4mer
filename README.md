@@ -58,12 +58,19 @@ bash ./scripts/run_icbeb.sh
 ## Reference
 If you use this codebase, or otherwise find our work valuable, please cite:
 ```
-@misc{tang2023modeling,
-      title={Modeling Multivariate Biosignals With Graph Neural Networks and Structured State Space Models}, 
-      author={Siyi Tang and Jared A. Dunnmon and Liangqiong Qu and Khaled K. Saab and Tina Baykaner and Christopher Lee-Messer and Daniel L. Rubin},
-      year={2023},
-      eprint={2211.11176},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG}
+
+@InProceedings{pmlr-v209-tang23a,
+  title = 	 {Modeling Multivariate Biosignals With Graph Neural Networks and Structured State Space Models},
+  author =       {Tang, Siyi and Dunnmon, Jared A and Liangqiong, Qu and Saab, Khaled K and Baykaner, Tina and Lee-Messer, Christopher and Rubin, Daniel L},
+  booktitle = 	 {Proceedings of the Conference on Health, Inference, and Learning},
+  pages = 	 {50--71},
+  year = 	 {2023},
+  editor = 	 {Mortazavi, Bobak J. and Sarker, Tasmie and Beam, Andrew and Ho, Joyce C.},
+  volume = 	 {209},
+  series = 	 {Proceedings of Machine Learning Research},
+  month = 	 {22 Jun--24 Jun},
+  publisher =    {PMLR},
+  pdf = 	 {https://proceedings.mlr.press/v209/tang23a/tang23a.pdf},
+  url = 	 {https://proceedings.mlr.press/v209/tang23a.html},
 }
 ```
